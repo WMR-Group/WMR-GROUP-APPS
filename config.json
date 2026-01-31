@@ -1,0 +1,25 @@
+{
+  "app": {
+    "version": "1.0.1",
+    "last_check": null,
+    "auto_update": true,
+    "language": "",
+    "theme": "black_white"
+  },
+  "paths": {
+    "install_dir": "install",
+    "downloads_dir": "downloads",
+    "temp_dir": "temp",
+    "data_dir": "data"
+  },
+  "updater": {
+    "repo_url": "https://api.github.com/repos/WMR-Group/WMR-GROUP-APPS/releases/latest",
+    "check_interval": 86400,
+    "enabled": true
+  },
+  "ui": {
+    "window_size": "1400x800",
+    "font_family": "Lucida Console",
+    "font_size": 10
+  }
+}
