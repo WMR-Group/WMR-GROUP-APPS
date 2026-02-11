@@ -1,6 +1,6 @@
 {
   "app": {
-    "version": "1.0.1",
+    "version": "1.1.3",
     "last_check": null,
     "auto_update": true,
     "language": "",
@@ -14,12 +14,15 @@
   },
   "updater": {
     "repo_url": "https://api.github.com/repos/WMR-Group/WMR-GROUP-APPS/releases/latest",
+    "update_file_url": "https://raw.githubusercontent.com/WMR-Group/WMR-GROUP-APPS/main/update.txt",
+    "changelog_url": "https://raw.githubusercontent.com/WMR-Group/WMR-GROUP-APPS/main/changelog.txt",
     "check_interval": 86400,
     "enabled": true
   },
   "ui": {
     "window_size": "1400x800",
     "font_family": "Lucida Console",
-    "font_size": 10
+    "font_size": 10,
+    "sound_effects": true
   }
 }

@@ -75,7 +75,7 @@ class LoadingScreen:
         
         version_label = tk.Label(
             main_frame,
-            text="v1.0.1",
+            text="v1.1.3",
             font=("Lucida Console", 12),
             bg="#000000",
             fg="#CCCCCC"

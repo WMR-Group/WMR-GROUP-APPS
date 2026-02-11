@@ -8,7 +8,7 @@ class Config:
         self.config_file = self.base_dir / "config.json"
         self.default_config = {
             "app": {
-                "version": "v1.0.1",
+                "version": "1.1.3",
                 "last_check": None,
                 "auto_update": True,
                 "language": None,
@@ -22,13 +22,16 @@ class Config:
             },
             "updater": {
                 "repo_url": "https://api.github.com/repos/WMR-Group/WMR-GROUP-APPS/releases/latest",
+                "update_file_url": "https://raw.githubusercontent.com/WMR-Group/WMR-GROUP-APPS/main/update.txt",
+                "changelog_url": "https://raw.githubusercontent.com/WMR-Group/WMR-GROUP-APPS/main/changelog.txt",
                 "check_interval": 86400,
                 "enabled": True
             },
             "ui": {
                 "window_size": "1400x800",
                 "font_family": "Lucida Console",
-                "font_size": 10
+                "font_size": 10,
+                "sound_effects": True
             }
         }
         self.config = self.load_config()
@@ -114,3 +117,9 @@ class Config:
         if not path.is_absolute():
             path = self.base_dir / path
         return path
+    
+    def get_sound_effects(self):
+        return self.get("ui.sound_effects", True)
+    
+    def set_sound_effects(self, enabled):
+        self.set("ui.sound_effects", enabled)

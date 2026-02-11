@@ -16,11 +16,157 @@ from urllib.parse import urlparse
 import tempfile
 import queue
 from concurrent.futures import ThreadPoolExecutor
+import math
 
 from config import Config
 import locales
 from about_dialog import AboutDialog
 from prog_info import ProgramInfo
+
+class CodeEditor:
+    def __init__(self, parent, file_path):
+        self.parent = parent
+        self.file_path = file_path
+        
+        self.editor_window = tk.Toplevel(parent)
+        self.editor_window.title(f"Code Editor - {os.path.basename(file_path)}")
+        self.editor_window.geometry("1000x700")
+        self.editor_window.configure(bg="#000000")
+        
+        self.setup_ui()
+        self.load_file()
+    
+    def setup_ui(self):
+        main_frame = tk.Frame(self.editor_window, bg="#000000")
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        header_frame = tk.Frame(main_frame, bg="#000000")
+        header_frame.pack(fill="x", pady=(0, 10))
+        
+        title_label = tk.Label(
+            header_frame,
+            text=f"Editing: {os.path.basename(self.file_path)}",
+            font=("Lucida Console", 12, "bold"),
+            bg="#000000",
+            fg="#FFFFFF"
+        )
+        title_label.pack(side="left")
+        
+        button_frame = tk.Frame(header_frame, bg="#000000")
+        button_frame.pack(side="right")
+        
+        save_btn = tk.Button(
+            button_frame,
+            text="SAVE",
+            font=("Lucida Console", 9, "bold"),
+            bg="#224422",
+            fg="#FFFFFF",
+            relief="solid",
+            borderwidth=1,
+            padx=15,
+            pady=5,
+            cursor="hand2",
+            command=self.save_file
+        )
+        save_btn.pack(side="left", padx=5)
+        
+        close_btn = tk.Button(
+            button_frame,
+            text="CLOSE",
+            font=("Lucida Console", 9),
+            bg="#442222",
+            fg="#FFFFFF",
+            relief="solid",
+            borderwidth=1,
+            padx=15,
+            pady=5,
+            cursor="hand2",
+            command=self.editor_window.destroy
+        )
+        close_btn.pack(side="left", padx=5)
+        
+        edit_frame = tk.Frame(main_frame, bg="#000000")
+        edit_frame.pack(fill="both", expand=True)
+        
+        line_numbers_frame = tk.Frame(edit_frame, bg="#1A1A1A", width=50)
+        line_numbers_frame.pack(side="left", fill="y")
+        line_numbers_frame.pack_propagate(False)
+        
+        self.line_numbers = tk.Text(
+            line_numbers_frame,
+            bg="#1A1A1A",
+            fg="#888888",
+            font=("Lucida Console", 10),
+            width=5,
+            height=30,
+            relief="flat",
+            borderwidth=0,
+            state="disabled"
+        )
+        self.line_numbers.pack(side="left", fill="both", expand=True)
+        
+        text_frame = tk.Frame(edit_frame, bg="#000000")
+        text_frame.pack(side="left", fill="both", expand=True)
+        
+        scrollbar = tk.Scrollbar(text_frame)
+        scrollbar.pack(side="right", fill="y")
+        
+        self.text_widget = tk.Text(
+            text_frame,
+            bg="#1A1A1A",
+            fg="#00FF00",
+            font=("Lucida Console", 10),
+            insertbackground="#FFFFFF",
+            selectbackground="#444444",
+            relief="solid",
+            borderwidth=1,
+            yscrollcommand=scrollbar.set,
+            undo=True
+        )
+        self.text_widget.pack(fill="both", expand=True)
+        scrollbar.config(command=self.text_widget.yview)
+        
+        self.text_widget.bind("<KeyRelease>", self.update_line_numbers)
+        self.text_widget.bind("<MouseWheel>", self.update_line_numbers)
+        self.text_widget.bind("<Button-4>", self.update_line_numbers)
+        self.text_widget.bind("<Button-5>", self.update_line_numbers)
+    
+    def load_file(self):
+        try:
+            with open(self.file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+                self.text_widget.delete(1.0, tk.END)
+                self.text_widget.insert(1.0, content)
+            
+            self.update_line_numbers()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load file: {str(e)}")
+    
+    def save_file(self):
+        try:
+            content = self.text_widget.get(1.0, tk.END)
+            with open(self.file_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            messagebox.showinfo("Success", "File saved successfully!")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save file: {str(e)}")
+    
+    def update_line_numbers(self, event=None):
+        self.line_numbers.config(state="normal")
+        self.line_numbers.delete(1.0, tk.END)
+        
+        lines = self.text_widget.get(1.0, tk.END).count('\n') + 1
+        for i in range(1, lines + 1):
+            self.line_numbers.insert(tk.END, f"{i}\n")
+        
+        self.line_numbers.config(state="disabled")
+        
+        self.text_widget.yview_moveto(self.text_widget.yview()[0])
+        self.line_numbers.yview_moveto(self.text_widget.yview()[0])
+    
+    def show(self):
+        self.editor_window.grab_set()
+        self.editor_window.wait_window()
 
 class WMRGroupApps:
     def __init__(self, root, config=None):
@@ -56,17 +202,160 @@ class WMRGroupApps:
         self.right_panel = None
         self.current_app = None
         self.apps_frame = None
+        self.canvas = None
         
         self.task_queue = queue.Queue()
         self.executor = ThreadPoolExecutor(max_workers=4)
         
         self.process_tasks()
         
+        self.sound_enabled = self.config.get_sound_effects()
+        
         self.setup_ui()
         
         self.check_app_versions()
         
         self.root.bind('<Configure>', self.on_window_resize)
+        self.setup_scroll_events()
+        
+        self.check_manager_update_on_start()
+    
+    def check_manager_update_on_start(self):
+        def check_task():
+            try:
+                from updater import Updater
+                updater = Updater(self.config)
+                update_info = updater.check_for_updates()
+                
+                if update_info.get("available", False):
+                    self.root.after(0, lambda: self.show_update_notification(update_info))
+            except:
+                pass
+        
+        self.add_task(check_task)
+    
+    def show_update_notification(self, update_info):
+        response = messagebox.askyesno(
+            self.tr["update_available_title"],
+            f"New version {update_info['latest_version']} is available!\n\n"
+            f"Current version: {update_info['current_version']}\n"
+            f"Release date: {update_info.get('release_date', 'Unknown')}\n\n"
+            f"Would you like to view the changelog and update?"
+        )
+        
+        if response:
+            self.show_changelog_and_update(update_info)
+    
+    def show_changelog_and_update(self, update_info):
+        changelog_window = tk.Toplevel(self.root)
+        changelog_window.title(f"Update to v{update_info['latest_version']}")
+        changelog_window.geometry("800x600")
+        changelog_window.configure(bg="#000000")
+        
+        main_frame = tk.Frame(changelog_window, bg="#000000")
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        title_label = tk.Label(
+            main_frame,
+            text=f"Update v{update_info['current_version']} → v{update_info['latest_version']}",
+            font=("Lucida Console", 16, "bold"),
+            bg="#000000",
+            fg="#FFFFFF"
+        )
+        title_label.pack(pady=(0, 10))
+        
+        changelog_text = scrolledtext.ScrolledText(
+            main_frame,
+            bg="#1A1A1A",
+            fg="#00FF00",
+            font=("Lucida Console", 9),
+            height=20
+        )
+        changelog_text.pack(fill="both", expand=True, pady=10)
+        
+        try:
+            changelog_url = self.config.get("updater.changelog_url")
+            response = requests.get(changelog_url, timeout=10)
+            if response.status_code == 200:
+                changelog_text.insert("1.0", response.text)
+            else:
+                changelog_text.insert("1.0", update_info.get("changelog", "No changelog available"))
+        except:
+            changelog_text.insert("1.0", update_info.get("changelog", "No changelog available"))
+        
+        changelog_text.config(state="disabled")
+        
+        button_frame = tk.Frame(main_frame, bg="#000000")
+        button_frame.pack(fill="x", pady=10)
+        
+        update_btn = tk.Button(
+            button_frame,
+            text="UPDATE NOW",
+            font=("Lucida Console", 10, "bold"),
+            bg="#224422",
+            fg="#FFFFFF",
+            relief="solid",
+            borderwidth=1,
+            padx=20,
+            pady=10,
+            cursor="hand2",
+            command=lambda: self.start_manager_update(update_info, changelog_window)
+        )
+        update_btn.pack(side="left", padx=10)
+        
+        cancel_btn = tk.Button(
+            button_frame,
+            text="CANCEL",
+            font=("Lucida Console", 10),
+            bg="#442222",
+            fg="#FFFFFF",
+            relief="solid",
+            borderwidth=1,
+            padx=20,
+            pady=10,
+            cursor="hand2",
+            command=changelog_window.destroy
+        )
+        cancel_btn.pack(side="right", padx=10)
+    
+    def start_manager_update(self, update_info, window):
+        window.destroy()
+        from updater import Updater
+        from update_dialog import UpdateDialog
+        
+        updater = Updater(self.config)
+        update_dialog = UpdateDialog(updater, update_info, self.config)
+        update_dialog.run()
+    
+    def play_sound(self, sound_type="hover"):
+        if not self.sound_enabled:
+            return
+        
+        try:
+            if sys.platform == "win32":
+                import winsound
+                if sound_type == "hover":
+                    winsound.Beep(800, 50)
+                elif sound_type == "click":
+                    winsound.Beep(1000, 30)
+        except:
+            pass
+    
+    def setup_scroll_events(self):
+        def on_mousewheel(event):
+            if self.canvas:
+                self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        self.root.bind_all("<MouseWheel>", on_mousewheel)
+        
+        def on_linux_scroll_up(event):
+            if self.canvas:
+                self.canvas.yview_scroll(-1, "units")
+        self.root.bind_all("<Button-4>", on_linux_scroll_up)
+        
+        def on_linux_scroll_down(event):
+            if self.canvas:
+                self.canvas.yview_scroll(1, "units")
+        self.root.bind_all("<Button-5>", on_linux_scroll_down)
     
     def on_window_resize(self, event):
         if event.widget == self.root:
@@ -76,13 +365,50 @@ class WMRGroupApps:
         if hasattr(self, 'right_panel') and self.right_panel:
             for widget in self.right_panel.winfo_children():
                 if isinstance(widget, tk.Canvas):
-                    for child in widget.winfo_children():
-                        if isinstance(child, tk.Frame):
-                            child.update_idletasks()
-                            widget.configure(scrollregion=widget.bbox("all"))
+                    widget.update_idletasks()
+                    widget.configure(scrollregion=widget.bbox("all"))
     
     def sync_program_info(self):
         self.prog_info.check_and_sync_all(str(self.install_dir))
+    
+    def animate_widget_color(self, widget, from_color, to_color, steps=10, duration=100):
+        def interpolate_color(color1, color2, factor):
+            r1, g1, b1 = int(color1[1:3], 16), int(color1[3:5], 16), int(color1[5:7], 16)
+            r2, g2, b2 = int(color2[1:3], 16), int(color2[3:5], 16), int(color2[5:7], 16)
+            r = int(r1 + (r2 - r1) * factor)
+            g = int(g1 + (g2 - g1) * factor)
+            b = int(b1 + (b2 - b1) * factor)
+            return f'#{r:02x}{g:02x}{b:02x}'
+        
+        for i in range(steps + 1):
+            factor = i / steps
+            color = interpolate_color(from_color, to_color, factor)
+            widget.after(int(duration * i / steps), lambda c=color: widget.config(bg=c))
+    
+    def slide_widget(self, widget, start_x, end_x, start_y, end_y, steps=20, duration=200):
+        dx = (end_x - start_x) / steps
+        dy = (end_y - start_y) / steps
+        
+        widget.place(x=start_x, y=start_y)
+        
+        for i in range(steps + 1):
+            x = start_x + dx * i
+            y = start_y + dy * i
+            widget.after(int(duration * i / steps), lambda x=x, y=y: widget.place(x=x, y=y))
+    
+    def fade_in_widget(self, widget, steps=20, duration=200):
+        if hasattr(widget, 'winfo_exists') and not widget.winfo_exists():
+            return
+            
+        current_alpha = widget.winfo_toplevel().attributes('-alpha') if hasattr(widget.winfo_toplevel(), 'attributes') else 1.0
+        
+        for i in range(steps + 1):
+            alpha = current_alpha + (1.0 - current_alpha) * (i / steps)
+            try:
+                widget.after(int(duration * i / steps), 
+                           lambda a=alpha: widget.winfo_toplevel().attributes('-alpha', a))
+            except:
+                pass
     
     def setup_styles(self):
         self.style = ttk.Style()
@@ -377,6 +703,8 @@ class WMRGroupApps:
         return 0
     
     def setup_ui(self):
+        self.root.attributes('-alpha', 0.0)
+        
         menubar = Menu(self.root)
         self.root.config(menu=menubar)
         
@@ -388,13 +716,17 @@ class WMRGroupApps:
         
         view_menu = Menu(menubar, tearoff=0)
         menubar.add_cascade(label=self.tr["view"], menu=view_menu)
-        view_menu.add_command(label=self.tr["check_updates"], command=self.check_github_updates)
+        view_menu.add_command(label=self.tr["check_updates"], command=self.check_manager_updates)
+        view_menu.add_command(label=self.tr["check_app_updates"], command=self.check_github_updates)
         view_menu.add_command(label=self.tr["open_install_folder"], command=lambda: self.open_folder(self.install_dir))
         
         tools_menu = Menu(menubar, tearoff=0)
         menubar.add_cascade(label=self.tr["tools"], menu=tools_menu)
         tools_menu.add_command(label=self.tr["detect_all_files"], command=self.detect_all_executables)
         tools_menu.add_command(label="Refresh App Status", command=self.refresh_all_app_status)
+        tools_menu.add_separator()
+        self.sound_var = tk.BooleanVar(value=self.sound_enabled)
+        tools_menu.add_checkbutton(label="Sound Effects", variable=self.sound_var, command=self.toggle_sound_effects)
         
         help_menu = Menu(menubar, tearoff=0)
         menubar.add_cascade(label=self.tr["help"], menu=help_menu)
@@ -417,7 +749,7 @@ class WMRGroupApps:
         
         version_label = tk.Label(
             logo_frame,
-            text="v1.0.1",
+            text="v1.1.3",
             font=("Lucida Console", 8),
             fg="#CCCCCC",
             bg="#1A1A1A"
@@ -457,10 +789,25 @@ class WMRGroupApps:
         )
         about_btn.pack(side="left", padx=4)
         
-        check_update_btn = tk.Button(
+        check_manager_update_btn = tk.Button(
             header_buttons,
-            text=self.tr["check_updates"],
+            text=self.tr["check_manager_update"],
             font=("Lucida Console", 8, "bold"),
+            bg="#222222",
+            fg="#FFFFFF",
+            relief="solid",
+            borderwidth=1,
+            padx=12,
+            pady=4,
+            cursor="hand2",
+            command=self.check_manager_updates
+        )
+        check_manager_update_btn.pack(side="left", padx=4)
+        
+        check_app_updates_btn = tk.Button(
+            header_buttons,
+            text=self.tr["check_app_updates"],
+            font=("Lucida Console", 8),
             bg="#222222",
             fg="#FFFFFF",
             relief="solid",
@@ -470,7 +817,7 @@ class WMRGroupApps:
             cursor="hand2",
             command=self.check_github_updates
         )
-        check_update_btn.pack(side="left", padx=4)
+        check_app_updates_btn.pack(side="left", padx=4)
         
         folder_btn = tk.Button(
             header_buttons,
@@ -538,19 +885,19 @@ class WMRGroupApps:
         canvas_frame = tk.Frame(left_panel, bg="#1A1A1A")
         canvas_frame.pack(fill="both", expand=True, padx=5, pady=(0, 8))
         
-        canvas = tk.Canvas(canvas_frame, bg="#1A1A1A", highlightthickness=0)
-        scrollbar = ttk.Scrollbar(canvas_frame, orient="vertical", command=canvas.yview)
-        self.apps_frame = tk.Frame(canvas, bg="#1A1A1A")
+        self.canvas = tk.Canvas(canvas_frame, bg="#1A1A1A", highlightthickness=0)
+        scrollbar = ttk.Scrollbar(canvas_frame, orient="vertical", command=self.canvas.yview)
+        self.apps_frame = tk.Frame(self.canvas, bg="#1A1A1A")
         
         self.apps_frame.bind(
             "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
         )
         
-        canvas.create_window((0, 0), window=self.apps_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
+        self.canvas.create_window((0, 0), window=self.apps_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=scrollbar.set)
         
-        canvas.pack(side="left", fill="both", expand=True)
+        self.canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         
         self.display_apps_list()
@@ -569,10 +916,78 @@ class WMRGroupApps:
         
         self.update_stats()
         
+        # СОЗДАЕМ ПРАВУЮ ПАНЕЛЬ ПРАВИЛЬНО
         self.right_panel = tk.Frame(main_container, bg="#000000")
         self.right_panel.pack(side="right", fill="both", expand=True)
         
+        # Инициализируем правую панель с приветствием
         self.show_welcome()
+        
+        self.root.after(100, lambda: self.fade_in_widget(self.root, steps=30, duration=300))
+    
+    def toggle_sound_effects(self):
+        self.sound_enabled = self.sound_var.get()
+        self.config.set_sound_effects(self.sound_enabled)
+        messagebox.showinfo("Settings", f"Sound effects {'enabled' if self.sound_enabled else 'disabled'}.")
+    
+    def check_manager_updates(self):
+        from updater import Updater
+        
+        updater = Updater(self.config)
+        update_info = updater.check_for_updates()
+        
+        if update_info.get("available", False):
+            self.show_changelog_and_update(update_info)
+        else:
+            messagebox.showinfo(
+                self.tr["info"],
+                self.tr["no_update"]
+            )
+    
+    def check_github_updates(self):
+        def check_updates_task():
+            updates_found = 0
+            for app in self.apps:
+                try:
+                    if app.get("github_api"):
+                        response = requests.get(app["github_api"], timeout=5)
+                        if response.status_code == 200:
+                            data = response.json()
+                            latest_version = data.get("tag_name", app["version"])
+                            
+                            local_ver = self.normalize_version(app["local_version"])
+                            latest_ver = self.normalize_version(latest_version)
+                            
+                            if self.compare_versions(latest_ver, local_ver) > 0:
+                                app["has_update"] = True
+                                app["latest_version"] = latest_version
+                                self.prog_info.set_update_available(app["name"], True, latest_version)
+                                updates_found += 1
+                            else:
+                                app["has_update"] = False
+                                self.prog_info.set_update_available(app["name"], False)
+                        else:
+                            app["has_update"] = False
+                    else:
+                        app["has_update"] = False
+                
+                except:
+                    app["has_update"] = False
+            
+            self.root.after(0, self.update_ui_after_check)
+            
+            if updates_found > 0:
+                self.root.after(0, lambda: messagebox.showinfo(
+                    self.tr["info"],
+                    f"Found {updates_found} application(s) with updates available!"
+                ))
+            else:
+                self.root.after(0, lambda: messagebox.showinfo(
+                    self.tr["info"],
+                    self.tr["no_update"]
+                ))
+        
+        self.add_task(check_updates_task)
     
     def refresh_all_app_status(self):
         def refresh_task():
@@ -665,86 +1080,113 @@ class WMRGroupApps:
         if not hasattr(self, "apps_frame") or not self.apps_frame:
             return
         
-        card = tk.Frame(
-            self.apps_frame,
-            bg="#222222",
-            relief="solid",
-            borderwidth=1
-        )
-        card.pack(fill="x", padx=8, pady=4, ipady=3)
+        for widget in self.apps_frame.winfo_children():
+            widget.destroy()
         
-        status_icon = "●"
-        status_color = "#00FF00" if app["status"] == "installed" else "#FF0000"
-        
-        if app.get("has_update", False):
-            status_icon = "↻"
-            status_color = "#FFFF00"
-        
-        icon_label = tk.Label(
-            card,
-            text=status_icon,
-            font=("Lucida Console", 10),
-            bg="#222222",
-            fg=status_color
-        )
-        icon_label.pack(side="left", padx=(10, 6), pady=6)
-        
-        text_frame = tk.Frame(card, bg="#222222")
-        text_frame.pack(side="left", fill="both", expand=True, padx=(0, 6))
-        
-        name_text = app["name"]
-        if app.get("has_update", False):
-            name_text += f" [{self.tr['update_to']} {app['latest_version']}]"
-        
-        name_label = tk.Label(
-            text_frame,
-            text=name_text,
-            font=("Lucida Console", 9, "bold"),
-            bg="#222222",
-            fg="#FFFFFF",
-            anchor="w"
-        )
-        name_label.pack(fill="x", pady=(3, 1))
-        
-        version_text = f"{app['local_version']} | {app['category']}"
-        version_label = tk.Label(
-            text_frame,
-            text=version_text,
-            font=("Lucida Console", 7),
-            bg="#222222",
-            fg="#CCCCCC",
-            anchor="w"
-        )
-        version_label.pack(fill="x")
-        
-        status_frame = tk.Frame(card, bg="#222222")
-        status_frame.pack(side="right", padx=(0, 10), pady=6)
-        
-        status_text = self.tr["installed"] if app["status"] == "installed" else self.tr["not_installed"]
-        status_bg = "#333333" if app["status"] == "installed" else "#222222"
-        
-        status_label = tk.Label(
-            status_frame,
-            text=status_text,
-            font=("Lucida Console", 7, "bold"),
-            bg=status_bg,
-            fg="#FFFFFF",
-            padx=6,
-            pady=1,
-            relief="solid",
-            borderwidth=1
-        )
-        status_label.pack()
-        
-        card.bind("<Button-1>", lambda e, a=app: self.show_app_details(a))
-        icon_label.bind("<Button-1>", lambda e, a=app: self.show_app_details(a))
-        name_label.bind("<Button-1>", lambda e, a=app: self.show_app_details(a))
-        
-        for widget in [card, icon_label, name_label]:
-            widget.bind("<Enter>", lambda e: e.widget.master.configure(bg="#333333") 
-                       if hasattr(e.widget, "master") else e.widget.configure(bg="#333333"))
-            widget.bind("<Leave>", lambda e: e.widget.master.configure(bg="#222222") 
-                       if hasattr(e.widget, "master") else e.widget.configure(bg="#222222"))
+        for app in self.apps:
+            card = tk.Frame(
+                self.apps_frame,
+                bg="#222222",
+                relief="solid",
+                borderwidth=1
+            )
+            card.pack(fill="x", padx=8, pady=4, ipady=3)
+            
+            status_icon = "●"
+            status_color = "#00FF00" if app["status"] == "installed" else "#FF0000"
+            
+            if app.get("has_update", False):
+                status_icon = "↻"
+                status_color = "#FFFF00"
+            
+            icon_label = tk.Label(
+                card,
+                text=status_icon,
+                font=("Lucida Console", 10),
+                bg="#222222",
+                fg=status_color
+            )
+            icon_label.pack(side="left", padx=(10, 6), pady=6)
+            
+            text_frame = tk.Frame(card, bg="#222222")
+            text_frame.pack(side="left", fill="both", expand=True, padx=(0, 6))
+            
+            name_text = app["name"]
+            if app.get("has_update", False):
+                name_text += f" [{self.tr['update_to']} {app['latest_version']}]"
+            
+            name_label = tk.Label(
+                text_frame,
+                text=name_text,
+                font=("Lucida Console", 9, "bold"),
+                bg="#222222",
+                fg="#FFFFFF",
+                anchor="w"
+            )
+            name_label.pack(fill="x", pady=(3, 1))
+            
+            version_text = f"{app['local_version']} | {app['category']}"
+            version_label = tk.Label(
+                text_frame,
+                text=version_text,
+                font=("Lucida Console", 7),
+                bg="#222222",
+                fg="#CCCCCC",
+                anchor="w"
+            )
+            version_label.pack(fill="x")
+            
+            status_frame = tk.Frame(card, bg="#222222")
+            status_frame.pack(side="right", padx=(0, 10), pady=6)
+            
+            status_text = self.tr["installed"] if app["status"] == "installed" else self.tr["not_installed"]
+            status_bg = "#333333" if app["status"] == "installed" else "#222222"
+            
+            status_label = tk.Label(
+                status_frame,
+                text=status_text,
+                font=("Lucida Console", 7, "bold"),
+                bg=status_bg,
+                fg="#FFFFFF",
+                padx=6,
+                pady=1,
+                relief="solid",
+                borderwidth=1
+            )
+            status_label.pack()
+            
+            def on_enter(e):
+                self.play_sound("hover")
+                original_bg = e.widget["bg"]
+                self.animate_widget_color(e.widget, original_bg, "#333333", steps=5, duration=50)
+            
+            def on_leave(e):
+                original_bg = "#222222"
+                self.animate_widget_color(e.widget, "#333333", original_bg, steps=5, duration=50)
+            
+            def on_click_app(e, app_data=app):
+                self.play_sound("click")
+                self.show_app_details(app_data)
+            
+            card.bind("<Enter>", on_enter)
+            card.bind("<Leave>", on_leave)
+            card.bind("<Button-1>", on_click_app)
+            
+            icon_label.bind("<Enter>", on_enter)
+            icon_label.bind("<Leave>", on_leave)
+            icon_label.bind("<Button-1>", on_click_app)
+            
+            name_label.bind("<Enter>", on_enter)
+            name_label.bind("<Leave>", on_leave)
+            name_label.bind("<Button-1>", on_click_app)
+            
+            version_label.bind("<Enter>", on_enter)
+            version_label.bind("<Leave>", on_leave)
+            version_label.bind("<Button-1>", on_click_app)
+            
+            status_label.bind("<Enter>", on_enter)
+            status_label.bind("<Leave>", on_leave)
+            status_label.bind("<Button-1>", on_click_app)
     
     def show_welcome(self):
         if not hasattr(self, "right_panel") or not self.right_panel:
@@ -784,8 +1226,23 @@ class WMRGroupApps:
         
         update_btn = tk.Button(
             actions_frame,
-            text=self.tr["check_for_updates"],
+            text=self.tr["check_manager_update"],
             font=("Lucida Console", 8, "bold"),
+            bg="#222222",
+            fg="#FFFFFF",
+            relief="solid",
+            borderwidth=1,
+            padx=20,
+            pady=8,
+            cursor="hand2",
+            command=self.check_manager_updates
+        )
+        update_btn.pack(side="left", padx=8)
+        
+        check_app_updates_btn = tk.Button(
+            actions_frame,
+            text=self.tr["check_app_updates"],
+            font=("Lucida Console", 8),
             bg="#222222",
             fg="#FFFFFF",
             relief="solid",
@@ -795,7 +1252,7 @@ class WMRGroupApps:
             cursor="hand2",
             command=self.check_github_updates
         )
-        update_btn.pack(side="left", padx=8)
+        check_app_updates_btn.pack(side="left", padx=8)
         
         sync_btn = tk.Button(
             actions_frame,
@@ -826,16 +1283,24 @@ class WMRGroupApps:
             command=lambda: self.open_folder(self.install_dir)
         )
         folder_btn.pack(side="left", padx=8)
+        
+        for btn in [update_btn, check_app_updates_btn, sync_btn, folder_btn]:
+            btn.bind("<Enter>", lambda e: [self.play_sound("hover"), self.animate_widget_color(e.widget, "#222222", "#444444", steps=5, duration=50)])
+            btn.bind("<Leave>", lambda e: self.animate_widget_color(e.widget, "#444444", "#222222", steps=5, duration=50))
+            btn.bind("<Button-1>", lambda e: self.play_sound("click"))
     
     def show_app_details(self, app):
         if not hasattr(self, "right_panel") or not self.right_panel:
+            print("DEBUG: right_panel not found!")
             return
         
         self.current_app = app
         
+        # Очищаем правую панель
         for widget in self.right_panel.winfo_children():
             widget.destroy()
         
+        # Создаем Canvas для прокрутки
         main_canvas = tk.Canvas(self.right_panel, bg="#000000", highlightthickness=0)
         scrollbar = ttk.Scrollbar(self.right_panel, orient="vertical", command=main_canvas.yview)
         main_frame = tk.Frame(main_canvas, bg="#000000")
@@ -851,6 +1316,12 @@ class WMRGroupApps:
         main_canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         
+        # Добавляем прокрутку колесиком мыши
+        def on_mousewheel(event):
+            main_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        main_canvas.bind_all("<MouseWheel>", on_mousewheel)
+        
+        # Верхняя часть с названием и кнопками
         top_frame = tk.Frame(main_frame, bg="#000000")
         top_frame.pack(fill="x", pady=(0, 15), padx=12)
         
@@ -882,6 +1353,7 @@ class WMRGroupApps:
         action_frame = tk.Frame(top_frame, bg="#000000")
         action_frame.pack(side="right")
         
+        # Кнопка просмотра релизов (если есть API)
         if app.get("releases_api"):
             releases_btn = tk.Button(
                 action_frame,
@@ -898,6 +1370,7 @@ class WMRGroupApps:
             )
             releases_btn.pack(side="left", padx=3)
         
+        # Кнопка GitHub
         github_btn = tk.Button(
             action_frame,
             text=self.tr["github"],
@@ -913,7 +1386,9 @@ class WMRGroupApps:
         )
         github_btn.pack(side="left", padx=3)
         
+        # Кнопки в зависимости от статуса приложения
         if app["status"] == "installed":
+            # Кнопка обновления если есть обновление
             if app.get("has_update", False):
                 update_btn = tk.Button(
                     action_frame,
@@ -930,6 +1405,7 @@ class WMRGroupApps:
                 )
                 update_btn.pack(side="left", padx=3)
             
+            # Кнопка удаления
             uninstall_btn = tk.Button(
                 action_frame,
                 text=self.tr["uninstall"],
@@ -945,6 +1421,7 @@ class WMRGroupApps:
             )
             uninstall_btn.pack(side="left", padx=3)
             
+            # Кнопка обнаружения файлов
             detect_btn = tk.Button(
                 action_frame,
                 text=self.tr["detect_files"],
@@ -960,6 +1437,7 @@ class WMRGroupApps:
             )
             detect_btn.pack(side="left", padx=3)
             
+            # Кнопка меню запуска
             run_menu_btn = tk.Button(
                 action_frame,
                 text=self.tr["run_menu"],
@@ -975,6 +1453,7 @@ class WMRGroupApps:
             )
             run_menu_btn.pack(side="left", padx=3)
         else:
+            # Кнопка установки (если доступна для платформы)
             if sys.platform != "win32" or (sys.platform == "win32" and app["name"] not in ["MUSM", "Lifus"]):
                 install_btn = tk.Button(
                     action_frame,
@@ -994,6 +1473,7 @@ class WMRGroupApps:
         separator = tk.Frame(main_frame, height=1, bg="#666666")
         separator.pack(fill="x", pady=(0, 15), padx=12)
         
+        # Описание приложения
         desc_frame = tk.Frame(main_frame, bg="#1A1A1A")
         desc_frame.pack(fill="x", pady=(0, 15), padx=12, ipadx=12, ipady=10)
         
@@ -1008,6 +1488,7 @@ class WMRGroupApps:
         )
         desc_label.pack(anchor="w")
         
+        # Информация о приложении (2 колонки)
         info_container = tk.Frame(main_frame, bg="#000000")
         info_container.pack(fill="x", pady=(0, 15), padx=12)
         
@@ -1078,6 +1559,7 @@ class WMRGroupApps:
         separator2 = tk.Frame(main_frame, height=1, bg="#666666")
         separator2.pack(fill="x", pady=(0, 15), padx=12)
         
+        # Заголовок для обнаруженных файлов
         files_header = tk.Frame(main_frame, bg="#000000")
         files_header.pack(fill="x", pady=(0, 10), padx=12)
         
@@ -1090,6 +1572,7 @@ class WMRGroupApps:
         )
         files_title.pack(anchor="w")
         
+        # Отображение обнаруженных файлов или сообщения об их отсутствии
         if app["name"] in self.detected_files and self.detected_files[app["name"]]:
             self.show_detected_files(main_frame, app)
         else:
@@ -1106,8 +1589,31 @@ class WMRGroupApps:
             )
             no_files_label.pack()
         
+        # Отступ снизу
         bottom_padding = tk.Frame(main_frame, height=30, bg="#000000")
         bottom_padding.pack(fill="x")
+        
+        # Добавляем обработчики событий для кнопок
+        buttons_to_bind = []
+        if 'releases_btn' in locals():
+            buttons_to_bind.append(releases_btn)
+        if 'github_btn' in locals():
+            buttons_to_bind.append(github_btn)
+        if 'update_btn' in locals():
+            buttons_to_bind.append(update_btn)
+        if 'uninstall_btn' in locals():
+            buttons_to_bind.append(uninstall_btn)
+        if 'detect_btn' in locals():
+            buttons_to_bind.append(detect_btn)
+        if 'run_menu_btn' in locals():
+            buttons_to_bind.append(run_menu_btn)
+        if 'install_btn' in locals():
+            buttons_to_bind.append(install_btn)
+        
+        for btn in buttons_to_bind:
+            btn.bind("<Enter>", lambda e: [self.play_sound("hover"), self.animate_widget_color(e.widget, e.widget["bg"], "#444444", steps=5, duration=50)])
+            btn.bind("<Leave>", lambda e: self.animate_widget_color(e.widget, "#444444", e.widget["bg"], steps=5, duration=50))
+            btn.bind("<Button-1>", lambda e: self.play_sound("click"))
     
     def show_run_menu(self, app):
         if app["name"] not in self.detected_files or not self.detected_files[app["name"]]:
@@ -1131,10 +1637,43 @@ class WMRGroupApps:
             menu.add_separator()
             
             for file_info in files:
-                menu.add_command(
-                    label=f"▶ {file_info['name']} ({file_info['type'].upper()})",
-                    command=lambda f=file_info.copy(): self.run_file(f)
-                )
+                if file_info["type"] == "py":
+                    submenu = tk.Menu(menu, tearoff=0, bg="#1A1A1A", fg="#FFFFFF")
+                    submenu.add_command(
+                        label="Run Normally",
+                        command=lambda f=file_info.copy(): self.run_file(f)
+                    )
+                    submenu.add_command(
+                        label="Run as Administrator",
+                        command=lambda f=file_info.copy(): self.run_as_admin(f)
+                    )
+                    submenu.add_command(
+                        label="Edit Code",
+                        command=lambda f=file_info.copy(): self.edit_code_file(f)
+                    )
+                    menu.add_cascade(
+                        label=f"▶ {file_info['name']} (PY)",
+                        menu=submenu
+                    )
+                elif file_info["type"] == "exe":
+                    submenu = tk.Menu(menu, tearoff=0, bg="#1A1A1A", fg="#FFFFFF")
+                    submenu.add_command(
+                        label="Run Normally",
+                        command=lambda f=file_info.copy(): self.run_file(f)
+                    )
+                    submenu.add_command(
+                        label="Run as Administrator",
+                        command=lambda f=file_info.copy(): self.run_as_admin(f)
+                    )
+                    menu.add_cascade(
+                        label=f"▶ {file_info['name']} (EXE)",
+                        menu=submenu
+                    )
+                else:
+                    menu.add_command(
+                        label=f"▶ {file_info['name']} ({file_info['type'].upper()})",
+                        command=lambda f=file_info.copy(): self.run_file(f)
+                    )
         
         menu.add_separator()
         menu.add_command(
@@ -1150,6 +1689,57 @@ class WMRGroupApps:
             menu.tk_popup(self.root.winfo_pointerx(), self.root.winfo_pointery())
         finally:
             menu.grab_release()
+    
+    def edit_code_file(self, file_info):
+        if file_info["type"] != "py":
+            messagebox.showinfo("Info", "Only Python (.py) files can be edited.")
+            return
+        
+        editor = CodeEditor(self.root, file_info["path"])
+        editor.show()
+    
+    def run_as_admin(self, file_info):
+        if sys.platform != "win32":
+            messagebox.showinfo("Info", "Run as Administrator is only available on Windows.")
+            return self.run_file(file_info)
+        
+        def run_task():
+            try:
+                file_path = file_info["path"]
+                file_type = file_info["type"]
+                file_name = file_info["name"]
+                file_dir = os.path.dirname(file_path)
+                
+                if sys.platform == "win32":
+                    import ctypes
+                    is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+                    
+                    if not is_admin:
+                        if file_type == "py":
+                            ctypes.windll.shell32.ShellExecuteW(
+                                None, "runas", sys.executable, 
+                                f'"{file_path}"', None, 1
+                            )
+                        elif file_type == "exe":
+                            ctypes.windll.shell32.ShellExecuteW(
+                                None, "runas", file_path, 
+                                None, None, 1
+                            )
+                    else:
+                        self.run_file(file_info)
+                
+                self.root.after(0, lambda: messagebox.showinfo(
+                    "Info",
+                    f"Attempting to run {file_name} as Administrator..."
+                ))
+                        
+            except Exception as e:
+                self.root.after(0, lambda: messagebox.showerror(
+                    "Error",
+                    f"Failed to run as Administrator:\n{str(e)}"
+                ))
+        
+        self.add_task(run_task)
     
     def show_releases(self, app):
         if not hasattr(self, "right_panel") or not self.right_panel:
@@ -1243,17 +1833,17 @@ class WMRGroupApps:
     
     def load_releases(self, app, parent_frame):
         for widget in parent_frame.winfo_children():
-            if widget.winfo_name() != "!frame" and widget.winfo_name() != "!frame2" and widget.winfo_name() != "!frame3":
-                continue
+            widget_name = widget.winfo_name()
+            if widget_name not in ["!frame", "!frame2", "!frame3", "!frame4", "!frame5"]:
+                widget.destroy()
         
         def load_task():
             try:
+                releases = []
                 if app.get("releases_api"):
                     releases = self.get_app_releases(app)
-                    
-                    self.root.after(0, lambda: self.display_releases(parent_frame, app, releases))
-                else:
-                    self.root.after(0, lambda: self.show_no_releases(parent_frame))
+                
+                self.root.after(0, lambda: self.display_releases(parent_frame, app, releases))
             
             except Exception as e:
                 self.root.after(0, lambda: self.show_releases_error(parent_frame, str(e)))
@@ -1266,15 +1856,22 @@ class WMRGroupApps:
             return self.releases_cache[cache_key]
         
         try:
+            if not app.get("releases_api"):
+                return []
+                
             response = requests.get(app["releases_api"], timeout=10)
             if response.status_code == 200:
                 releases = response.json()
-                self.releases_cache[cache_key] = releases
-                return releases
-        except:
-            pass
-        
-        return []
+                if isinstance(releases, list):
+                    self.releases_cache[cache_key] = releases
+                    return releases
+                else:
+                    return []
+            else:
+                return []
+        except Exception as e:
+            print(f"Error fetching releases for {app['name']}: {e}")
+            return []
     
     def display_releases(self, parent_frame, app, releases):
         for widget in parent_frame.winfo_children():
@@ -1563,6 +2160,22 @@ class WMRGroupApps:
             )
             details_label.pack(fill="x")
             
+            if file_info["type"] == "py":
+                edit_btn = tk.Button(
+                    file_frame,
+                    text="EDIT",
+                    font=("Lucida Console", 7, "bold"),
+                    bg="#222266",
+                    fg="#FFFFFF",
+                    relief="solid",
+                    borderwidth=1,
+                    padx=8,
+                    pady=2,
+                    cursor="hand2",
+                    command=lambda f=file_info.copy(): self.edit_code_file(f)
+                )
+                edit_btn.pack(side="right", padx=(0, 6))
+            
             run_btn = tk.Button(
                 file_frame,
                 text=self.tr["run"],
@@ -1577,6 +2190,22 @@ class WMRGroupApps:
                 command=lambda f=file_info.copy(): self.run_file(f)
             )
             run_btn.pack(side="right", padx=(0, 6))
+            
+            if sys.platform == "win32" and file_info["type"] in ["exe", "py"]:
+                admin_btn = tk.Button(
+                    file_frame,
+                    text="ADMIN",
+                    font=("Lucida Console", 7),
+                    bg="#442222",
+                    fg="#FFFFFF",
+                    relief="solid",
+                    borderwidth=1,
+                    padx=8,
+                    pady=2,
+                    cursor="hand2",
+                    command=lambda f=file_info.copy(): self.run_as_admin(f)
+                )
+                admin_btn.pack(side="right", padx=(0, 6))
             
             folder_btn = tk.Button(
                 file_frame,
@@ -2254,38 +2883,6 @@ TROUBLESHOOTING:
             command=error_window.destroy
         )
         close_btn.pack(pady=12)
-    
-    def check_github_updates(self):
-        def check_updates_task():
-            for app in self.apps:
-                try:
-                    if app.get("github_api"):
-                        response = requests.get(app["github_api"], timeout=5)
-                        if response.status_code == 200:
-                            data = response.json()
-                            latest_version = data.get("tag_name", app["version"])
-                            
-                            local_ver = self.normalize_version(app["local_version"])
-                            latest_ver = self.normalize_version(latest_version)
-                            
-                            if self.compare_versions(latest_ver, local_ver) > 0:
-                                app["has_update"] = True
-                                app["latest_version"] = latest_version
-                                self.prog_info.set_update_available(app["name"], True, latest_version)
-                            else:
-                                app["has_update"] = False
-                                self.prog_info.set_update_available(app["name"], False)
-                        else:
-                            app["has_update"] = False
-                    else:
-                        app["has_update"] = False
-                
-                except:
-                    app["has_update"] = False
-            
-            self.root.after(0, self.update_ui_after_check)
-        
-        self.add_task(check_updates_task)
     
     def update_ui_after_check(self):
         self.display_apps_list()

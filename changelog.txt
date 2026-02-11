@@ -1,0 +1,48 @@
+WMR Group Apps - Changelog
+===========================
+
+Version 1.1.3 (2026-02-01)
+---------------------------
+• Added "Run as Administrator" option for EXE and Python files
+• Added built-in code editor for Python files with line numbers
+• Added sound effects on button hover and click (Windows only)
+• Added automatic update check on startup
+• Added changelog display for updates
+• Improved update system with changelog support
+• Added sound effects toggle in Tools menu
+• Version changed to 1.1.3
+• Fixed menu checkbox issue
+• Minor UI improvements and bug fixes
+
+Версия 1.1.3 (2026-02-01)
+---------------------------
+• Добавлена опция "Запуск от имени администратора" для EXE и Python файлов
+• Добавлен встроенный редактор кода для Python файлов с нумерацией строк
+• Добавлены звуковые эффекты при наведении и клике на кнопки (только Windows)
+• Добавлена автоматическая проверка обновлений при запуске
+• Добавлено отображение истории изменений для обновлений
+• Улучшена система обновлений с поддержкой истории изменений
+• Добавлен переключатель звуковых эффектов в меню Инструменты
+• Версия изменена на 1.1.3
+• Исправлена проблема с флажками в меню
+• Незначительные улучшения интерфейса и исправления ошибок
+
+Version 1.0.2 (2026-01-XX)
+---------------------------
+• Initial release with application management
+• GitHub integration for updates
+• EXE/BAT file detection
+• Multi-language support (English/Russian)
+• Installation and uninstallation system
+• Release history viewer
+• Black/white console-style UI
+
+Версия 1.0.2 (2026-01-XX)
+---------------------------
+• Первый релиз с управлением приложениями
+• Интеграция с GitHub для обновлений
+• Обнаружение EXE/BAT файлов
+• Поддержка нескольких языков (Английский/Русский)
+• Система установки и удаления
+• Просмотр истории релизов
+• Черно-белый интерфейс в стиле консоли

@@ -78,7 +78,7 @@ class AboutDialog:
         
         version_label = tk.Label(
             main_frame,
-            text=f"{self.tr['version']}: v1.0.1",
+            text=f"{self.tr['version']}: v1.1.3",
             font=("Lucida Console", 12),
             bg="#000000",
             fg="#CCCCCC"
@@ -152,7 +152,8 @@ class AboutDialog:
             self.tr["feature2"],
             self.tr["feature3"],
             self.tr["feature4"],
-            self.tr["feature5"]
+            self.tr["feature5"],
+            self.tr["feature6"]
         ]
         
         for feature in features:
@@ -165,6 +166,21 @@ class AboutDialog:
                 anchor="w"
             )
             feature_label.pack(anchor="w", padx=20, pady=2)
+        
+        changelog_btn = tk.Button(
+            main_frame,
+            text="VIEW CHANGELOG",
+            font=("Lucida Console", 10),
+            bg="#222222",
+            fg="#FFFFFF",
+            relief="solid",
+            borderwidth=1,
+            padx=20,
+            pady=8,
+            cursor="hand2",
+            command=self.show_changelog
+        )
+        changelog_btn.pack(pady=10)
         
         close_btn = tk.Button(
             main_frame,
@@ -180,6 +196,64 @@ class AboutDialog:
             command=self.dialog.destroy
         )
         close_btn.pack(pady=20)
+    
+    def show_changelog(self):
+        try:
+            changelog_window = tk.Toplevel(self.dialog)
+            changelog_window.title("Changelog - WMR Group Apps")
+            changelog_window.geometry("600x500")
+            changelog_window.configure(bg="#000000")
+            
+            main_frame = tk.Frame(changelog_window, bg="#000000")
+            main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+            
+            title_label = tk.Label(
+                main_frame,
+                text="WMR Group Apps - Changelog",
+                font=("Lucida Console", 16, "bold"),
+                bg="#000000",
+                fg="#FFFFFF"
+            )
+            title_label.pack(pady=(0, 10))
+            
+            changelog_text = scrolledtext.ScrolledText(
+                main_frame,
+                bg="#1A1A1A",
+                fg="#00FF00",
+                font=("Lucida Console", 9),
+                height=20
+            )
+            changelog_text.pack(fill="both", expand=True, pady=10)
+            
+            try:
+                changelog_path = os.path.join(os.path.dirname(__file__), "changelog.txt")
+                if os.path.exists(changelog_path):
+                    with open(changelog_path, "r", encoding="utf-8") as f:
+                        changelog_text.insert("1.0", f.read())
+                else:
+                    changelog_text.insert("1.0", "Changelog not found.")
+            except:
+                changelog_text.insert("1.0", "Unable to load changelog.")
+            
+            changelog_text.config(state="disabled")
+            
+            close_btn = tk.Button(
+                main_frame,
+                text="CLOSE",
+                font=("Lucida Console", 10),
+                bg="#222222",
+                fg="#FFFFFF",
+                relief="solid",
+                borderwidth=1,
+                padx=20,
+                pady=8,
+                cursor="hand2",
+                command=changelog_window.destroy
+            )
+            close_btn.pack(pady=10)
+            
+        except Exception as e:
+            print(f"Error showing changelog: {e}")
     
     def show(self):
         self.dialog.grab_set()
